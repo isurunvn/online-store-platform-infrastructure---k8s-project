@@ -1,0 +1,41 @@
+name: Validate Terraform
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: Terraform CI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TF_IN_AUTOMATION: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned tools
+        run: |
+          python3 ci/install-tools.py trivy gitleaks actionlint
+          python3 ci/install-terraform.py
+      - run: actionlint
+      - run: terraform fmt -check -recursive terraform-iac
+      - name: Initialize without backend or cloud credentials
+        working-directory: terraform-iac/environments/prod
+        run: terraform init -backend=false -input=false -lockfile=readonly
+      - name: Validate configuration
+        working-directory: terraform-iac/environments/prod
+        run: terraform validate -no-color
+      - run: gitleaks git . --redact --no-banner
+      - run: python3 ci/scan.py config terraform-iac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: terraform-security-report
+          path: .ci-output/trivy-config.json
+          include-hidden-files: true
+          retention-days: 14
